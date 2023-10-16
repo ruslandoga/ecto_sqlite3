@@ -10,7 +10,7 @@ alias Ecto.Integration.TestRepo
 
 Application.put_env(:ecto_sqlite3, TestRepo,
   adapter: Ecto.Adapters.SQLite3,
-  database: "/tmp/exqlite_sandbox_test.db",
+  database: Path.join(System.tmp_dir!(), "ecto_sqlite3_test.db"),
   pool: Ecto.Adapters.SQL.Sandbox,
   show_sensitive_data_on_connection_error: true
 )
