@@ -210,7 +210,6 @@ defmodule Ecto.Adapters.SQLite3 do
   @impl Ecto.Adapter.Storage
   def storage_up(options) do
     database = Keyword.get(options, :database)
-    pool_size = Keyword.get(options, :pool_size)
 
     cond do
       is_nil(database) ->
@@ -227,14 +226,14 @@ defmodule Ecto.Adapters.SQLite3 do
       File.exists?(database) ->
         {:error, :already_up}
 
-      database == ":memory:" && pool_size != 1 ->
+      database == ":memory:" ->
         raise ArgumentError, """
         In memory databases must have a pool_size of 1
         """
 
       true ->
-        {:ok, state} = Exqlite.Connection.connect(options)
-        :ok = Exqlite.Connection.disconnect(:normal, state)
+        {:ok, conn} = Exqlite.open(database)
+        :ok = Exqlite.close(conn)
     end
   end
 
@@ -501,5 +500,22 @@ defmodule Ecto.Adapters.SQLite3 do
     cmd_opts = Keyword.put_new(cmd_opts, :stderr_to_stdout, true)
 
     System.cmd(cmd, args, cmd_opts)
+  end
+
+  @impl true
+  def execute(adapter_meta, _query_meta, query_cache, params, options) do
+    %{pid: pid} = adapter_meta
+    {:cache, _f, {_i, sql}} = query_cache
+    timeout = Keyword.fetch!(options, :timeout)
+
+    IO.inspect(
+      adapter_meta: adapter_meta,
+      query_cache: query_cache,
+      params: params,
+      options: options
+    )
+
+    Ecto.Adapters.SQLite3.Reader.fetch_all(@conn.reader(pid), sql, params, timeout)
+    |> IO.inspect()
   end
 end

@@ -27,69 +27,53 @@ defmodule Ecto.Adapters.SQLite3.Connection do
 
   def start_link(opts) do
     opts = default_opts(opts)
-    DBConnection.start_link(Exqlite.Connection, opts)
+    _ = Keyword.fetch!(opts, :database)
+
+    children = [
+      {Ecto.Adapters.SQLite3.Writer, opts},
+      {Ecto.Adapters.SQLite3.Reader, opts}
+    ]
+
+    Supervisor.start_link(children, strategy: :one_for_one)
+  end
+
+  def writer(conn) do
+    [_reader, {Ecto.Adapters.SQLite3.Writer, pid, _, _}] =
+      Supervisor.which_children(conn)
+
+    pid
+  end
+
+  def reader(conn) do
+    [{Ecto.Adapters.SQLite3.Reader, pid, _, _}, _writer] =
+      Supervisor.which_children(conn)
+
+    pid
   end
 
   @impl true
   def child_spec(options) do
-    {:ok, _} = Application.ensure_all_started(:db_connection)
-    options = default_opts(options)
-    DBConnection.child_spec(Exqlite.Connection, options)
+    %{
+      id: __MODULE__,
+      type: :supervisor,
+      start: {__MODULE__, :start_link, [options]}
+    }
   end
 
   @impl true
   def prepare_execute(conn, name, sql, params, options) do
-    query = Exqlite.Query.build(name: name, statement: sql)
-
-    case DBConnection.prepare_execute(conn, query, params, options) do
-      {:ok, _, _} = ok -> ok
-      {:error, %Exqlite.Error{}} = error -> error
-      {:error, err} -> raise err
-    end
+    IO.inspect(conn: conn, name: name, sql: sql, params: params, options: options)
+    raise "todo"
   end
 
   @impl true
-  def execute(conn, %Exqlite.Query{ref: ref} = cached, params, options)
-      when ref != nil do
-    DBConnection.execute(conn, cached, params, options)
-  end
-
-  def execute(
-        conn,
-        %Exqlite.Query{statement: statement, ref: nil},
-        params,
-        options
-      ) do
-    execute(conn, statement, params, options)
-  end
-
-  def execute(conn, sql, params, options) when is_binary(sql) or is_list(sql) do
-    query = Exqlite.Query.build(name: "", statement: IO.iodata_to_binary(sql))
-
-    case DBConnection.prepare_execute(conn, query, params, options) do
-      {:ok, %Exqlite.Query{}, result} -> {:ok, result}
-      {:error, %Exqlite.Error{}} = error -> error
-      {:error, err} -> raise err
-    end
-  end
-
-  def execute(conn, query, params, options) do
-    case DBConnection.execute(conn, query, params, options) do
-      {:ok, _} = ok -> ok
-      {:error, %ArgumentError{} = err} -> {:reset, err}
-      {:error, %Exqlite.Error{}} = error -> error
-      {:error, err} -> raise err
-    end
+  def execute(_conn, _query, _params, _options) do
+    raise "todo"
   end
 
   @impl true
-  def query(conn, sql, params, options) do
-    query = Exqlite.Query.build(statement: IO.iodata_to_binary(sql))
-
-    case DBConnection.execute(conn, query, params, options) do
-      {:ok, _, result} -> {:ok, result}
-      other -> other
-    end
+  def query(conn, sql, params, _options) do
+    Ecto.Adapters.SQLite3.Writer.query(writer(conn), sql, params)
   end
 
   @impl true
@@ -98,9 +82,10 @@ defmodule Ecto.Adapters.SQLite3.Connection do
   end
 
   @impl true
-  def stream(conn, sql, params, options) do
-    query = Exqlite.Query.build(statement: sql)
-    DBConnection.stream(conn, query, params, options)
+  def stream(_conn, _sql, _params, _options) do
+    # query = Exqlite.Query.build(statement: sql)
+    # DBConnection.stream(conn, query, params, options)
+    raise "todo"
   end
 
   # we want to return the name of the underlying index that caused
@@ -331,7 +316,7 @@ defmodule Ecto.Adapters.SQLite3.Connection do
     type = Keyword.get(opts, :type, :query_plan)
 
     case query(conn, build_explain_query(query, type), params, opts) do
-      {:ok, %Exqlite.Result{} = result} ->
+      {:ok, result} ->
         case type do
           :query_plan -> {:ok, format_query_plan_explain(result)}
           :instructions -> {:ok, SQL.format_table(result)}
